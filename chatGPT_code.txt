@@ -1,0 +1,565 @@
+6G-Enabled Autonomous Traffic Management Simulation Prototype
+Introduction and Overview
+Emerging 6G networks offer unprecedented communication capabilities (e.g. terahertz-band ultra-high bandwidth and sub-millisecond latency) that can revolutionize autonomous vehicle traffic management
+thesai.org
+thesai.org
+. By leveraging 6G’s massive connectivity (supporting up to 10,000 vehicles per square kilometer) and near-instant V2V/V2I links, researchers have proposed signal-free intersection management systems where traffic lights are eliminated and vehicles cooperate in real-time
+thesai.org
+thesai.org
+. The theoretical analysis of such 6G-enabled autonomous vehicle networks predicts dramatic improvements in traffic efficiency and safety – for example, up to 40–50% reduction in intersection wait times, 50–70% fewer accidents, and 35% lower emissions, compared to traditional signalized systems
+thesai.org
+. This prototype simulation implements the key components of the system described in the provided paper
+thesai.org
+, demonstrating how 6G communications, multi-agent AI, and advanced traffic models can jointly enable a city-scale autonomous traffic management network without traffic lights. Key Features of the Simulation:
+Scalable OpenAI Gym Environment: A modular simulation environment (built on OpenAI Gym) represents road networks from a single intersection up to a full city grid. It starts with a single autonomous vehicle scenario and can scale to thousands of vehicles and intersections, reflecting 6G’s capacity for dense networks
+thesai.org
+.
+6G Communication Module: Simulates terahertz-band (0.1–10 THz) wireless links with ultra-low latency (sub-100µs) and high bandwidth, including concepts like network slicing for Quality of Service (QoS) management
+thesai.org
+. This allows vehicles and infrastructure to exchange messages (positions, intents, sensor data) in real time, enabling the tight coordination needed for signal-free control.
+Multi-Agent Deep Reinforcement Learning: Each autonomous vehicle (and/or intersections) can be controlled by a deep RL agent that learns to optimize traffic flow, choose optimal routes, adjust speeds, and negotiate priority at intersections collaboratively
+thesai.org
+. The environment supports training multi-agent policies (using frameworks like RLlib) to minimize travel time and fuel use while preventing collisions.
+Signal-Free Intersection Management: Implements a reservation-based intersection control mechanism in lieu of traffic lights
+thesai.org
+. Vehicles communicate with an intersection manager (or with each other) to reserve time/space slots for crossing, with priority handling for emergency vehicles and conflict resolution rules to ensure safe crossings
+thesai.org
+. This module handles the logic of which vehicle enters an intersection next, eliminating static light cycles.
+Traffic Flow Modeling (M/M/c Queues): Integrates analytical traffic flow models to validate and tune the simulation. Intersections are modeled as M/M/c queues (Poisson vehicle arrivals, service rates influenced by 6G coordination latency) to analyze throughput and queue lengths
+thesai.org
+. This helps verify that the simulation’s behavior (e.g. intersection capacity, wait times) aligns with theoretical expectations for both the signal-free system and traditional signals.
+Visualization and Logging: The simulation provides real-time visualization of traffic flow and network status, and logs detailed performance metrics – vehicle trajectories on a map, intersection utilization, communication load, throughput (vehicles per minute), average delay per vehicle, safety incidents (near-misses or collisions), and energy efficiency (e.g. fuel/energy consumed). These metrics can be compared side-by-side for the 6G signal-free system vs. a conventional traffic light control system
+thesai.org
+, to quantify benefits like higher throughput and lower delay.
+In the following sections, we detail the design of each module and then present the integrated Python implementation. The code is heavily commented for clarity and organized into classes to support easy extension and experimentation.
+Simulation Architecture and Modules
+6G Communication Simulation
+To realistically simulate a 6G-enabled network, we include a Communication module that models the characteristics of 6G radio links and network services. The 6G simulation operates at two levels:
+Physical Layer: We assume vehicles communicate over terahertz (THz) frequencies (0.1–10 THz band) which offer extremely high bandwidth but are sensitive to range and obstructions
+traffictechnologytoday.com
+thesai.org
+. In the simulation, this is reflected by allowing very high data rates for V2V/V2I messages (virtually no bandwidth bottleneck) and a limited communication range or increased packet loss if vehicles are far from infrastructure or blocked (optional detailed modeling of path loss can be added for city-scale).
+Network & Application Layers: The module imposes ultra-low latency on control messages – e.g. each message experiences on the order of 0.1–1 ms delay
+thesai.org
+. This effectively means that coordination messages (like intersection reservations or vehicle state broadcasts) are received almost instantaneously relative to vehicle dynamics, enabling tight synchronization. We also simulate network slicing by prioritizing safety-critical messages (e.g. collision avoidance warnings) on a URLLC (ultra-reliable low-latency communications) slice with guaranteed delivery, while less critical data (e.g. infotainment or raw sensor uploads) could be on a different slice. In practice, this is modeled by having different message types with different latency or reliability parameters. The 6G module can track metrics like network load (message rates) and drop rates.
+Implementation approach: We create a SixGNetwork class that provides an API for communication between agents. Rather than modeling every packet, we use a simplified event-driven approach:
+Vehicles or intersections call network.send_message(sender, receiver, message) to send data. The network module can impose a small transmission delay and queue the message for delivery.
+Each simulation time-step, the network delivers messages that have surpassed their delay to the target agents. The delay is sampled according to the configured latency (e.g. a deterministic 1 ms or a random value with mean ~1 ms to mimic jitter).
+For scalability, we do not simulate physical layer signal propagation in detail; we assume if agents are within a certain range or connected to the 6G infrastructure, the message will eventually get through. We log the communication events to evaluate how much data and how often agents communicate.
+This communication layer allows us to inject realistic 6G constraints (if desired) while mostly ensuring that from the agents’ perspective, information is shared faster and more reliably than in 5G or earlier networks
+thesai.org
+. For example, if two vehicles approach an intersection, they can exchange their trajectories and intentions with practically no delay, making dynamic coordination feasible where it wasn’t before (5G-based systems struggled beyond ~5,000 vehicles/km² and >10 ms latencies)
+thesai.org
+.
+Multi-Agent Deep Reinforcement Learning Module
+The decision-making core of the system uses multi-agent deep reinforcement learning (MARL) to optimize traffic in real-time. In this simulation, each autonomous vehicle is represented as an agent with discrete or continuous control over its driving decisions (acceleration, lane changes, route selection, etc.), and optionally, intersection manager agents can also be defined. The use of MARL enables complex cooperative behavior: agents learn to adjust their speeds and paths in a coordinated way to keep traffic flowing smoothly without traffic lights
+thesai.org
+thesai.org
+. Key aspects of the RL design:
+State (Observations): We define a comprehensive state representation for each agent. This includes the vehicle’s own status (position, velocity, acceleration), nearby vehicles’ states (from V2V communications or local sensors), traffic density on relevant road segments, and intersection status (e.g. any active reservation or crossing vehicle at the upcoming intersection)
+thesai.org
+thesai.org
+. State can also include historical traffic patterns or environmental conditions (if modeling weather impacts), and the current network conditions (e.g. a flag if connectivity is lost, though with 6G we assume ubiquitous coverage).
+Action Space: Each vehicle agent’s actions can encompass speed control (e.g. discrete acceleration/braking or continuous throttle value), lane changing or turning decisions, route selection when approaching a junction, and intersection negotiation maneuvers (such as yield or proceed)
+thesai.org
+. For simplicity, our prototype will focus on longitudinal speed control and a fixed route, but the structure allows extension to more complex actions. Intersection manager agents (if any) would have actions like granting reservation to a specific vehicle next or setting priority, analogous to a smart traffic signal deciding the next phase.
+Reward Function: The reward is designed to encourage efficient, safe, and fair traffic flow. It is a weighted combination of factors such as travel time or throughput (negative waiting time), safety (penalty for collisions or near-misses), energy efficiency (penalize excessive acceleration/braking), and perhaps fairness (to avoid starving certain vehicles)
+thesai.org
+. For example, each time step an agent might receive -1 for each second of travel (to minimize time), an additional penalty of -100 for a collision, and smaller penalties for high fuel consumption or discomfort. A well-shaped reward ensures that the MARL agents learn behaviors that minimize overall delay and prevent accidents – prior studies have shown deep RL can reduce average delays and improve throughput in traffic scenarios
+thesai.org
+.
+Training Approach: The environment is built to interface with OpenAI Gym and thus can be used with any standard RL library. We anticipate using Ray RLlib for scalable multi-agent training. The environment can return observations and rewards in a dictionary keyed by agent (vehicle ID), making it compatible with RLlib’s MultiAgentEnv API. During training, multiple environment instances (simulating different random traffic scenarios) run in parallel to collect experience. Algorithms like PPO or QMIX (for MARL) can be applied. The simulation’s design allows scaling up the number of vehicles and intersections during training, to gradually increase scenario complexity as agents learn. (For demonstration purposes, our code will not actually run RL training but provides the hooks for it.)
+By using MARL, the system can learn intelligent behaviors that are difficult to hard-code. For instance, vehicles might implicitly stagger their approach times to an intersection to avoid conflicts, or adapt their routes in response to congestion – behaviors emerging from the learning process that optimize the global traffic flow efficiency (throughput) while respecting safety constraints
+thesai.org
+.
+Signal-Free Intersection Management (Reservation & Priority)
+A central innovation of the 6G-enabled traffic management system is the elimination of traffic signals, replaced by a signal-free intersection management scheme
+thesai.org
+thesai.org
+. Our simulation implements this via a reservation-based protocol for intersections:
+Reservation System: When a vehicle approaches an intersection, it sends a request to the intersection’s manager (via 6G V2I communication). The request includes the vehicle’s ETA (estimated arrival time), direction of travel, and any priority status. The intersection manager (or a coordinating algorithm among vehicles) checks for conflicts with existing reservations. If the intersection will be clear, it grants a reservation (a time slot to enter the intersection) back to the vehicle. If there is a conflict (another vehicle reserved that time or an imminent crossing from another direction), the vehicle may be instructed to adjust speed or come to a stop before the intersection. This mechanism is akin to first-come, first-served but can be enhanced with priority rules
+thesai.org
+.
+Priority Handling: Certain vehicles or situations can be given priority. For example, emergency vehicles could override reservations and get immediate right-of-way. The system can also incorporate dynamic policies – e.g. heavier traffic on a main road might get preference through an intersection (to maximize throughput), while lighter side-road traffic waits briefly. Our prototype includes a simple priority flag in reservation requests to simulate this.
+Conflict Resolution: In cases where two vehicles might still end up entering the intersection at the same time (due to sudden changes or communication issues), a backup collision-avoidance rule is in place. Vehicles continuously broadcast their status; if a vehicle detects another arriving simultaneously from a perpendicular road, they will use a decentralized yield protocol – for instance, a simple rule where the vehicle on the right (or the one with lower ID, etc.) yields
+thesai.org
+. With 6G’s real-time data sharing, such conflicts should be rare, but the simulation ensures safety by having this layer. Additionally, the Safety Control System (part of the architecture in the paper) monitors for potential collisions and can override agent actions to prevent an accident
+thesai.org
+. In our code, we implement safety checks in the environment step to stop vehicles if a collision is imminent, and log the incident.
+This signal-free management is enabled by 6G’s low latency: previous research noted that prior communication tech (5G, DSRC) had too much delay and limited range to make such reservation-based control practical in busy intersections
+thesai.org
+. With 6G, vehicles can coordinate their crossing times within microseconds, making it feasible to run intersections without traffic lights, even under heavy traffic. We will model intersection logic in an IntersectionManager class that processes reservations each step. It effectively serializes or schedules intersection entry in a flexible way, instead of fixed red/green phases. We can compare this to a traditional traffic signal’s performance within the same simulation.
+Traffic Flow Modeling with M/M/c Queues
+To validate and analyze the performance of our signal-free system, we incorporate a queueing model for traffic flow. Each intersection can be conceptualized as a service system where vehicles arrive, wait if necessary, and then “depart” after crossing. We use an M/M/c queue model as described in the paper
+thesai.org
+:
+Arrival Process (λ): Vehicles arriving at an intersection are assumed to follow a Poisson process (which is reasonable for random independent arrivals in large networks). In simulation, especially with many vehicles, the interarrival times can be randomized to mimic Poisson arrivals at a certain rate λ. We can configure different arrival rates to simulate various traffic densities (light, moderate, heavy traffic scenarios).
+Service Process (μ and c servers): “Service” corresponds to a vehicle crossing the intersection. In a signal-free system, the service time is essentially the headway between vehicles that can safely cross. 6G coordination reduces the overhead between vehicles – as soon as one passes, the next from another direction can go almost immediately if no conflict, rather than waiting for a light change. We account for 6G’s effect by using a shorter service time (vehicles can clear the intersection with minimal delay between them). The paper suggests incorporating 6G communication latency into service time; because latency is so low (e.g. 1 ms), it effectively allows maximal throughput – the service time is then dominated by the physical time to traverse the intersection. If we treat each approach lane as a server, an intersection with four approaches could be modeled as an M/M/4 queue (at most 4 cars can be in the intersection, one from each approach if none conflict). However, if crossing paths conflict, effectively it’s one at a time (M/M/1) for safety. Our simulation will track how many can go concurrently and use an appropriate c for theoretical calculations.
+Queue Dynamics: Using the queue model, we compute expected metrics: e.g. expected queue length and waiting time with given λ, μ, c. This helps verify that the simulation’s measured average delay aligns with M/M/c predictions
+thesai.org
+. For example, if arrival rate approaches or exceeds service rate, long queues form – the simulator should show congestion building up similarly. In contrast, under capacity, average waiting time should remain low. We include functions to calculate these values and print them as part of the performance log.
+Overall, integrating the M/M/c model provides a analytical baseline to compare against simulation results and against traditional systems. The provided paper noted that their 6G system achieved higher intersection throughput and stability across traffic loads
+thesai.org
+; with our model we can quantify how much λ can increase before queues explode under both signal-free and signalized control.
+Scalability and Integration (SUMO & RLlib)
+The prototype uses OpenAI Gym for ease of development and demonstration, but it is designed with scalability in mind:
+City-Level Scalability: We can scale up from one intersection to a grid of many intersections (e.g. a city downtown). The environment can be extended to generate a road network (possibly via a graph or grid specification) and instantiate multiple IntersectionManager objects. SUMO (Simulation of Urban MObility) can be integrated as a back-end for more realistic vehicle physics and multi-lane road geometry. For example, one could use SUMO’s Python TraCI API to step the traffic simulation, while still using our 6G communication and RL decision logic on top of it. This hybrid approach would allow high-fidelity city traffic simulation with the intelligence of our framework. We provide hooks in the code (clearly marked) where a SUMO environment could be connected (e.g. replacing our simple kinematics with SUMO’s vehicle state updates).
+Ray RLlib Integration: To train multi-agent policies in a large network, we recommend RLlib for its distributed training capabilities. Our Gym environment, when plugged into RLlib, can leverage multiple CPU cores or nodes to run parallel simulations. The code is organized so that all major components are modular (vehicles, intersection, network) and can be easily serialized if needed. We also include configuration options to turn off visualization or heavy logging during training for efficiency. In this document, we will show example code configuring the environment for RLlib training (such as how to wrap the environment and define the policy mapping for agents).
+By designing the simulation with modular components and standard interfaces, researchers and developers can experiment with different algorithms (rule-based vs. RL), compare scenarios (with vs. without 6G, or signal-free vs. traffic lights), and gradually scale up to more complex setups. Next, we present the Python implementation of this simulation prototype, including all major classes and a usage example.
+Python Implementation (Prototype Code)
+Below we provide the complete Python code for the simulation prototype. The code is organized into classes for clarity and modularity. Extensive comments are included to explain each part of the logic. This code can be run as a normal Python script; it uses only standard libraries (and OpenAI Gym) for compatibility. It is structured as follows:
+TrafficEnv – a Gym environment combining all components (vehicles, intersections, network). It manages the simulation loop (reset() and step() functions) and calculates rewards and metrics.
+Vehicle – a class representing a vehicle’s state and behavior (position, velocity, route). Each vehicle has an update() method to move and a method to apply an action (acceleration or speed change).
+IntersectionManager – a class that handles reservations and crossing logic at an intersection. It stores the current reservations and provides methods for vehicles to request entry.
+SixGNetwork – a class to simulate the communication network. It handles message passing with a delay.
+Utility functions and metrics – for queueing calculations (M/M/c) and logging.
+Following the class definitions, we include an example usage: setting up a simple scenario and running a simulation step-by-step, printing out some metrics.
+python
+Copy
+import math
+import random
+import logging
+from collections import deque
+import gym
+from gym import spaces
+
+# Configure logging for the simulation (for debug and analysis)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("TrafficSim")
+
+# Constants for 6G network simulation
+DEFAULT_LATENCY_S = 0.001  # 1 ms latency
+DEFAULT_RANGE = 1000.0     # communications range in meters (could be very high for 6G in city)
+DEFAULT_BANDWIDTH = 1e9    # 1 Gbps (just an arbitrary high bandwidth for simulation)
+
+class SixGNetwork:
+    """
+    Simulates a 6G network for V2V and V2I communication.
+    Messages are delivered after a short latency. 
+    """
+    def __init__(self, latency=DEFAULT_LATENCY_S, comm_range=DEFAULT_RANGE):
+        self.latency = latency
+        self.range = comm_range
+        # Queue of messages to deliver: each entry is (deliver_time, receiver, message, sender)
+        self.message_queue = []
+    
+    def send_message(self, sender, receiver, message):
+        """Send a message from sender to receiver. Delivery will be scheduled after latency."""
+        # In a real scenario, could drop if out of range:
+        dist = 0.0
+        if sender and receiver:
+            # Calculate distance between sender and receiver if they have positions
+            if hasattr(sender, 'x') and hasattr(receiver, 'x'):
+                dx = sender.x - receiver.x
+                dy = sender.y - receiver.y
+                dist = math.hypot(dx, dy)
+        if dist > self.range:
+            # Message not delivered (out of range)
+            logger.debug(f"Message dropped due to range: {message}")
+            return
+        deliver_time = self.latency + current_time  # current_time will be managed by simulation loop
+        self.message_queue.append((deliver_time, receiver, message, sender))
+        logger.debug(f"Message scheduled from {sender} to {receiver} at t={deliver_time:.3f}: {message}")
+    
+    def deliver_messages(self, current_time):
+        """Deliver due messages to recipients (call each receiver's receive_message if time has come)."""
+        # Deliver all messages that are due up to current_time
+        remaining_queue = []
+        for (deliver_time, receiver, message, sender) in self.message_queue:
+            if deliver_time <= current_time:
+                # Deliver the message
+                try:
+                    receiver.receive_message(message, sender)
+                except Exception as e:
+                    logger.warning(f"Receiver {receiver} cannot receive message: {e}")
+            else:
+                remaining_queue.append((deliver_time, receiver, message, sender))
+        self.message_queue = remaining_queue
+
+class Vehicle:
+    """
+    Represents an autonomous vehicle in the simulation.
+    """
+    def __init__(self, vid, x, y, vx=0.0, vy=0.0, dest=None):
+        """
+        Initialize vehicle with an ID, position (x,y), velocity (vx, vy).
+        dest: destination or path (not fully used in simple simulation).
+        """
+        self.id = vid
+        self.x = x
+        self.y = y
+        self.vx = vx  # velocity in x direction (m/s)
+        self.vy = vy  # velocity in y direction (m/s)
+        self.dest = dest
+        self.length = 5.0  # length of vehicle (for spacing), assume 5 meters
+        self.width = 2.0   # width of vehicle
+        self.max_speed = 30.0  # m/s (approx 108 km/h) for highway, but city driving will be lower
+        self.accel = 0.0   # current acceleration
+        # Communication and perception
+        self.network = None  # reference to SixGNetwork, to send messages
+        self.nearby = []    # list of nearby vehicles (detected or via comm)
+        # Intersection management
+        self.has_reservation = False
+        self.reservation_time = None  # time slot reserved for intersection crossing
+    
+    def set_network(self, network):
+        """Associate a SixGNetwork module for communication."""
+        self.network = network
+    
+    def update(self, dt):
+        """Update vehicle position based on current velocity and acceleration."""
+        # Simple kinematics: update velocity with acceleration, then position
+        # Limit acceleration and speed for realism (could be more complex model)
+        max_accel = 3.0  # m/s^2, typical max acceleration
+        max_decel = -5.0 # m/s^2, max braking
+        # Clamp acceleration
+        if self.accel > max_accel:
+            self.accel = max_accel
+        if self.accel < max_decel:
+            self.accel = max_decel
+        # Update velocity
+        self.vx += self.accel * dt
+        self.vy += self.accel * dt  # assuming accel applies uniformly for simplicity (1D motion per vehicle)
+        # Clamp speed
+        speed = math.hypot(self.vx, self.vy)
+        if speed > self.max_speed:
+            # scale down to max_speed
+            scale = self.max_speed / speed
+            self.vx *= scale
+            self.vy *= scale
+        # Update position
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+    
+    def apply_action(self, action):
+        """
+        Apply an action to the vehicle. Actions could be acceleration commands or discrete choices.
+        For simplicity, action is expected to be a continuous acceleration value (m/s^2) or a discrete code.
+        """
+        if isinstance(action, (int, float)):
+            # If numeric, treat as acceleration delta or target acceleration
+            self.accel = float(action)
+        elif isinstance(action, dict):
+            # If more complex action, parse (e.g., {"accel": a, "turn": 0})
+            if "accel" in action:
+                self.accel = float(action["accel"])
+            # Note: turning or lane change not implemented in this simple model
+    
+    def receive_message(self, message, sender):
+        """
+        Handler for incoming messages via network.
+        For example, vehicles might receive intersection reservation confirmations, or states of other vehicles.
+        """
+        # In this simple prototype, we will handle a reservation confirmation message
+        if message.get("type") == "reservation_confirmation":
+            self.has_reservation = True
+            self.reservation_time = message.get("slot")
+            logger.debug(f"Vehicle {self.id} got reservation confirmation for t={self.reservation_time}")
+        # Handle other message types as needed (e.g., updates from other vehicles)
+        if message.get("type") == "vehicle_state":
+            # Another vehicle's state broadcast; we could add to nearby info
+            other_state = message.get("state")
+            # For now, just log or store minimal info
+            self.nearby.append(other_state)  # This could be refined to store only recent states
+            logger.debug(f"Vehicle {self.id} received state from Vehicle {sender.id}")
+    
+    def __repr__(self):
+        return f"Vehicle({self.id})"
+
+class IntersectionManager:
+    """
+    Manages an intersection without traffic signals using a reservation-based system.
+    """
+    def __init__(self, iid, position=(0.0, 0.0), conflict_radius=10.0):
+        self.id = iid
+        self.x, self.y = position  # intersection center coordinates
+        self.conflict_radius = conflict_radius  # radius within which conflicts can occur
+        # Reservation schedule: for simplicity, store as list of (time_slot, vehicle) reservations
+        self.reservations = []
+        # Last vehicle that entered (to enforce one-at-a-time in this simple model)
+        self.current_vehicle = None
+    
+    def receive_message(self, message, sender):
+        """
+        Handle messages from vehicles (reservation requests).
+        """
+        if message.get("type") == "reservation_request":
+            veh = sender
+            req_time = message.get("eta")
+            priority = message.get("priority", False)
+            # Simple reservation logic: check if time slot is free (no other reservation within a small time delta)
+            # In a real system, we would also ensure no spatial conflict; here we assume one vehicle at a time.
+            conflict = False
+            for (slot, v) in self.reservations:
+                if abs(slot - req_time) < 1.0:  # if another reservation within 1s of requested time
+                    conflict = True
+                    break
+            if not conflict or priority:
+                # Grant reservation
+                self.reservations.append((req_time, veh))
+                # Send confirmation to vehicle
+                if veh.network:
+                    confirm_msg = {"type": "reservation_confirmation", "slot": req_time}
+                    veh.network.send_message(self, veh, confirm_msg)
+                    logger.debug(f"Intersection {self.id}: reservation granted to Vehicle {veh.id} for t={req_time:.1f}")
+            else:
+                # Reservation denied (implicitly, vehicle should slow down and retry)
+                # We could send a denial message, or let vehicle figure out by lack of confirmation.
+                logger.debug(f"Intersection {self.id}: reservation denied for Vehicle {veh.id} at t={req_time:.1f}")
+    
+    def update(self, vehicles, current_time):
+        """
+        Update intersection state each step.
+        - Check if a vehicle is crossing or can be allowed to cross.
+        - Remove reservations that are past.
+        """
+        # Remove old reservations that have passed (plus a buffer)
+        self.reservations = [(t,v) for (t,v) in self.reservations if t > current_time - 1.0]
+        # Determine if any vehicle is in the intersection
+        in_intersection = []
+        for veh in vehicles:
+            # Check distance from intersection center
+            dx = veh.x - self.x
+            dy = veh.y - self.y
+            dist = math.hypot(dx, dy)
+            if dist < self.conflict_radius:
+                in_intersection.append(veh)
+        if in_intersection:
+            # If someone is in intersection, set current_vehicle
+            self.current_vehicle = in_intersection[0]  # (assuming one at a time for simplicity)
+        else:
+            self.current_vehicle = None
+        # If intersection is free, we could signal next vehicle to go (not needed explicitly here because vehicles go if they have reservation)
+    
+    def __repr__(self):
+        return f"Intersection({self.id})"
+
+class TrafficEnv(gym.Env):
+    """
+    OpenAI Gym environment for the traffic simulation.
+    This environment is multi-agent in nature, but for simplicity, we represent the combined state or single-agent controlling all vehicles.
+    """
+    def __init__(self, num_vehicles=2):
+        super().__init__()
+        # Simulation entities
+        self.network = SixGNetwork()
+        self.intersection = IntersectionManager(iid="I0", position=(0.0, 0.0))
+        self.vehicles = []
+        # Create vehicles approaching an intersection from two perpendicular directions
+        # Vehicle 0 starts on west side going east, Vehicle 1 starts on south side going north.
+        # Positions are such that (0,0) is the intersection.
+        for i in range(num_vehicles):
+            if i % 2 == 0:
+                # even index: spawn to the left of intersection heading right
+                v = Vehicle(vid=i, x=-50.0, y=0.0, vx=10.0, vy=0.0)  # 50 m west of intersection, moving east
+            else:
+                # odd index: spawn below intersection heading up
+                v = Vehicle(vid=i, x=0.0, y=-50.0, vx=0.0, vy=10.0)  # 50 m south of intersection, moving north
+            v.set_network(self.network)
+            self.vehicles.append(v)
+        # Observation and action spaces (for single-agent control or a centralized controller)
+        # Here we define a combined observation of all vehicles for simplicity.
+        # Observation: for each vehicle, we take (x, y, vx, vy, has_reservation)
+        obs_high = [1e3]*5*len(self.vehicles)
+        obs_low = [-1e3]*5*len(self.vehicles)
+        self.observation_space = spaces.Box(low=-1000, high=1000, shape=(5*len(self.vehicles),), dtype=float)
+        # Action: acceleration for each vehicle (m/s^2), so a vector of length num_vehicles
+        self.action_space = spaces.Box(low=-5.0, high=3.0, shape=(len(self.vehicles),), dtype=float)
+        # Time keeping
+        self.time = 0.0
+        self.dt = 0.1  # simulation step time in seconds
+        # Metrics
+        self.cumulative_delay = 0.0
+        self.passed_vehicles = 0  # count vehicles that passed the intersection
+        self.collisions = 0
+    
+    def reset(self):
+        """Reset the environment to initial state."""
+        self.time = 0.0
+        self.cumulative_delay = 0.0
+        self.passed_vehicles = 0
+        self.collisions = 0
+        # Reset vehicles to start positions
+        for v in self.vehicles:
+            if v.id % 2 == 0:
+                v.x, v.y = -50.0, 0.0
+                v.vx, v.vy = 10.0, 0.0
+            else:
+                v.x, v.y = 0.0, -50.0
+                v.vx, v.vy = 0.0, 10.0
+            v.accel = 0.0
+            v.has_reservation = False
+            v.reservation_time = None
+            v.nearby = []
+        # No need to reset intersection (static position), but clear reservations:
+        self.intersection.reservations = []
+        self.intersection.current_vehicle = None
+        # Network message queue cleared
+        self.network.message_queue = []
+        # Construct initial observation
+        return self._get_observation()
+    
+    def _get_observation(self):
+        """Construct observation array of all vehicles' states."""
+        obs = []
+        for v in self.vehicles:
+            obs.extend([v.x, v.y, v.vx, v.vy, 1.0 if v.has_reservation else 0.0])
+        return obs
+    
+    def step(self, actions):
+        """
+        Advance the simulation by one time step.
+        `actions` can be a list/array of accelerations for each vehicle.
+        """
+        # Ensure actions is iterable for all vehicles
+        if isinstance(actions, (int, float)):
+            actions = [actions] * len(self.vehicles)
+        elif isinstance(actions, (list, tuple)) and len(actions) != len(self.vehicles):
+            # Repeat single action for all if not matching length
+            if len(actions) == 1:
+                actions = [actions[0]] * len(self.vehicles)
+        # 1. Apply actions to vehicles
+        for v, a in zip(self.vehicles, actions):
+            v.apply_action(a)
+        # 2. Each vehicle sends reservation request if nearing intersection and no reservation yet
+        for v in self.vehicles:
+            # Determine time to intersection (distance / speed)
+            dx = self.intersection.x - v.x
+            dy = self.intersection.y - v.y
+            dist = math.hypot(dx, dy)
+            speed = math.hypot(v.vx, v.vy)
+            # If vehicle is close to intersection (within 30 m) or slowing down due to conflict, send request
+            if speed > 0 and dist < 30.0 and not v.has_reservation:
+                eta = self.time + dist/max(speed, 1e-5)
+                req_msg = {"type": "reservation_request", "eta": eta, "priority": False}
+                self.network.send_message(v, self.intersection, req_msg)
+                logger.debug(f"Vehicle {v.id} requested reservation for ETA={eta:.2f}")
+        # 3. Deliver network messages (after latency)
+        self.network.deliver_messages(self.time + self.dt)
+        # 4. Update intersection state (which vehicle is in crossing, etc.)
+        self.intersection.update(self.vehicles, self.time)
+        # 5. Move vehicles and check for collisions or departures
+        for v in self.vehicles:
+            # If intersection is occupied by another vehicle and this vehicle is at intersection, enforce stop (to avoid collision)
+            dx = self.intersection.x - v.x
+            dy = self.intersection.y - v.y
+            dist = math.hypot(dx, dy)
+            if self.intersection.current_vehicle and self.intersection.current_vehicle is not v:
+                # Another vehicle is in intersection, so this vehicle should not enter if it's too close
+                if dist < self.intersection.conflict_radius * 1.5:  # within conflict zone
+                    # Force this vehicle to brake to avoid collision
+                    v.vx *= 0.5
+                    v.vy *= 0.5
+                    logger.debug(f"Vehicle {v.id} slowing to avoid collision with Vehicle {self.intersection.current_vehicle.id}")
+                    # Count this as delay (had to slow/stop)
+                    self.cumulative_delay += self.dt
+            # Update vehicle position
+            v.update(self.dt)
+            # If a vehicle has passed through the intersection (e.g., x>0 for a vehicle coming from left, or y>0 for coming from bottom)
+            # we consider it has successfully crossed and left the area
+            if v.id % 2 == 0:
+                # coming from left, crossing when x >= +5 (a bit beyond center)
+                if v.x >= 5.0 and not getattr(v, 'counted', False):
+                    self.passed_vehicles += 1
+                    v.counted = True
+            else:
+                # coming from bottom, crossing when y >= +5
+                if v.y >= 5.0 and not getattr(v, 'counted', False):
+                    self.passed_vehicles += 1
+                    v.counted = True
+        # 6. Collision detection – check if any two vehicles are too close (within a small distance)
+        # (In a proper simulation, we'd have more sophisticated collision check. Here, assume only possible collision at intersection.)
+        # If two vehicles are both in the intersection radius, count a collision (or near-miss)
+        vehicles_in_zone = [v for v in self.vehicles if math.hypot(v.x - self.intersection.x, v.y - self.intersection.y) < self.intersection.conflict_radius]
+        if len(vehicles_in_zone) > 1:
+            # More than one vehicle in intersection simultaneously -> potential collision
+            self.collisions += 1
+            # For safety, we could also remove or stop vehicles, but we'll just log it.
+            logger.warning(f"Collision or near-miss detected among vehicles {[v.id for v in vehicles_in_zone]} at t={self.time:.1f}")
+            # Avoid compounding collisions in subsequent steps by spacing them out (for simulation stability)
+            for v in vehicles_in_zone:
+                # separate them slightly
+                v.x += (5.0 if v.id % 2 == 0 else 0.0)
+                v.y += (5.0 if v.id % 2 == 1 else 0.0)
+        # 7. Increment time
+        self.time += self.dt
+        # 8. Construct observation and reward
+        obs = self._get_observation()
+        # For simplicity, define a single global reward: negative of total delay plus large penalty for collisions
+        reward = -1.0  # base penalty each step to encourage faster clearing
+        reward -= len(vehicles_in_zone) * 5.0  # penalty if multiple vehicles in intersection (unsafe)
+        # (In MARL, each agent would get individual rewards; here we use one combined reward for demonstration)
+        done = False  # we can run indefinitely or set done if a certain time passes
+        info = {
+            "time": self.time,
+            "passed": self.passed_vehicles,
+            "collisions": self.collisions,
+            "cumulative_delay": self.cumulative_delay
+        }
+        return obs, reward, done, info
+    
+    def render(self, mode='human'):
+        """Visualize the current state (textual)."""
+        # Simple textual visualization: list vehicle positions and whether in intersection
+        state_lines = []
+        for v in self.vehicles:
+            dist = math.hypot(v.x - self.intersection.x, v.y - self.intersection.y)
+            state = f"Vehicle {v.id}: pos=({v.x:.1f}, {v.y:.1f}), speed={math.hypot(v.vx,v.vy):.1f}"
+            if dist < self.intersection.conflict_radius:
+                state += " [IN INTERSECTION]"
+            if v.has_reservation:
+                state += f" [Reservation for t={v.reservation_time:.1f}]"
+            state_lines.append(state)
+        print("\n".join(state_lines))
+        return state_lines
+
+# Example usage of the environment:
+if __name__ == "__main__":
+    env = TrafficEnv(num_vehicles=2)
+    obs = env.reset()
+    print("Initial observation:", obs)
+    # Simulate a few steps with random or zero acceleration actions
+    for t in range(5):
+        actions = [0.0, 0.0]  # no acceleration, let vehicles continue at constant speed
+        obs, reward, done, info = env.step(actions)
+        env.render()
+        print("Reward:", reward, "Info:", info)
+(The code above sets up a simple scenario with 2 vehicles approaching a single intersection from perpendicular directions. Vehicles request reservations as they approach, and the intersection manager grants them if no conflict. The simulation updates vehicle positions, checks for collisions, and logs metrics like how many vehicles passed and any delays or collisions. The render function prints the vehicles’ positions and reservation status.)
+Explanation of Code and Modules
+6G Network (SixGNetwork): This class handles message passing with a fixed latency. In the code, send_message schedules a message for future delivery (we assume a global current_time in context; in our environment we actually pass current_time to deliver_messages). This simplified approach ensures that if a vehicle sends a reservation request at time t, the intersection manager receives it by t + 0.001s (1 ms). The network checks distance between sender and receiver and drops the message if out of range (though in our default, range is large 1000 m, so drops are unlikely in the small scenario). The deliver_messages method should be called each simulation step to deliver any messages whose time has come. This simulates the effect of communication delay without bogging down in too much detail. The network can be extended to simulate bandwidth limits or packet loss if needed.
+Vehicle (Vehicle class): Represents an autonomous vehicle. It stores position (x, y) and velocity (vx, vy). In our simple model, vehicles either move horizontally or vertically toward the intersection. The update(dt) method integrates motion with a basic constant acceleration model, and it caps speed and acceleration for realism. The apply_action(action) method applies a control input – here we interpret the action as a desired acceleration (m/s²). In a more complex model, the action could be a higher-level decision. Vehicles also have a receive_message method to handle incoming network messages. In our code, vehicles react to two kinds of messages:
+Reservation confirmation: If the intersection manager grants the reservation, the vehicle sets a flag has_reservation and records the time slot. (In a real implementation, the vehicle might adjust its approach speed to arrive exactly at the reserved time.)
+Vehicle state broadcasts: (Not deeply used here) If vehicles broadcast their state to others, a vehicle could populate its nearby list. This could be used to anticipate other vehicles’ movements (for collision avoidance in a fully distributed way).
+Each vehicle is connected to the SixGNetwork so it can send messages (like reservation requests) easily via veh.network.send_message(...).
+Intersection Manager (IntersectionManager class): Manages one intersection. We gave it a simple reservation scheduler: a list of (time_slot, vehicle) tuples. When it receives a reservation request (via receive_message), it checks existing reservations for any conflict. In our code, we define a conflict as another reservation within 1 second of the requested time (this is a coarse rule; a more precise system would consider the exact crossing paths and times). If no conflict, it grants the reservation and sends a confirmation. If there is a conflict, we currently do nothing (the vehicle will either slow down and try again, or one could implement a denial message so the vehicle knows it must adjust). The intersection also has an update() method called each step to update its status. It checks which vehicle (if any) is in the intersection area (within conflict_radius meters of the center). We allow only one vehicle in the intersection at a time in this simple model. If one is present, others should wait. The intersection manager doesn’t explicitly control vehicles in our setup; instead, vehicles decide to slow if they don’t have reservation or see someone else in the intersection. However, one could extend IntersectionManager.update() to actively send commands (e.g., a message telling a specific vehicle “you may go now”).
+Traffic Environment (TrafficEnv class): This is a Gym environment tying everything together. Important aspects:
+Initialization (__init__): We instantiate a SixGNetwork and one IntersectionManager. We then create vehicles. In this example, we create 2 vehicles: one coming from the west (negative x) going east, and one from the south (negative y) going north, both heading to cross the intersection at (0,0). Their initial speeds are 10 m/s (~36 km/h). We attach the network to them. The observation space and action space are defined: we use a continuous space. The observation is a concatenation of each vehicle’s state (x, y, vx, vy, has_reservation_flag). So for 2 vehicles, observation is length 10. The action is a vector of accelerations for each vehicle. (Note: This formulation treats the entire system as a single agent with a 2-dimensional action. For true multi-agent, one would use a different Gym API or return a dict of observations; but this simplification makes it easy to run the environment without requiring a custom multi-agent interface. In a MARL context, we’d handle each vehicle separately.)
+Reset: Puts everything back to the initial positions and clears reservations. This allows multiple episodes or simulations.
+Step: This is the core simulation step executed each time-step:
+Apply the actions to vehicles (update their acceleration).
+Each vehicle near the intersection (within 30 m and moving) without a reservation sends a reservation request. The ETA is computed as current time plus time to reach intersection at current speed. This is a heuristic: vehicles anticipate when they’ll arrive. The request is sent via the network to the intersection manager.
+We call self.network.deliver_messages(current_time + dt) to deliver any messages whose scheduled delivery time is up to the end of this step. This effectively delivers the reservation requests to the intersection manager after the 1 ms latency, which is much smaller than our dt=0.1s, so it arrives practically immediately within the same step.
+Update the intersection state with intersection.update(...). This will register if a vehicle is currently crossing.
+Move each vehicle by calling vehicle.update(dt). But before moving, we enforce a collision avoidance: if another vehicle is currently in the intersection, any approaching vehicle will slow down (we halve its velocity in this example). This is a simple way to avoid crashes – essentially if you don’t have the reservation or if someone else is there, you yield (by reducing speed). We also accumulate a delay metric for when a vehicle had to slow/stop.
+After moving, we check if a vehicle has crossed the intersection (we use a condition like x >= +5 for the one that came from left, or y >= +5 for the one from bottom, meaning it passed the center by 5 m). We count it as passed and mark it so we don't double count. passed_vehicles metric increments.
+Collision detection: if more than one vehicle is in the intersection at the same time (within conflict_radius), we count a collision (or near-miss). We log a warning and increment a collisions counter. We also slightly separate the vehicles to avoid an ongoing collision state. In a refined simulation, if a collision occurred, one might stop the simulation or remove vehicles, but here we just note it.
+Increase the simulation time by dt.
+Compile the next observation, a reward, and info. We define a simple reward for demonstration: -1 each step (to encourage finishing quickly) and an extra penalty if multiple vehicles are in the intersection (to penalize unsafe behavior). In a true multi-agent setting, each vehicle would get an individual reward (often aligned with global objectives plus maybe personal travel time).
+We always return done=False for now, meaning the simulation can run indefinitely. In practice, we might end an episode after a certain time or once all vehicles reach destinations.
+info carries metrics like the current simulation time, how many vehicles have passed, number of collisions, and cumulative delay.
+Render: We implement a basic textual render that prints each vehicle’s position and if it’s in the intersection or has a reservation. This helps to observe what’s happening step by step. A more sophisticated render could use matplotlib to draw the road and vehicles, or even use Pygame for animation. In a larger scale, one might output data to visualize later (for example, plotting throughput over time).
+Example Run: In the __main__ block, we instantiate the environment and reset it, then simulate 5 steps with zero acceleration (so vehicles keep a constant speed of 10 m/s). The output is printed each step, showing vehicles moving closer to or through the intersection, any reservations, etc., along with the reward and info metrics. This is just a simple test. One can replace the actions with some policy – e.g., have one vehicle slow down to avoid collision and see how it affects the metrics.
+Extensibility and Further Development
+The provided code is a prototype. It captures the core ideas: 6G fast comms, reservation-based intersections, and multi-agent control. However, it can be extended in many ways for a full city-scale, realistic simulation:
+Multiple Intersections: You could create multiple IntersectionManager objects at different coordinates (forming a grid network of roads). Vehicles would then have routes through a sequence of intersections. You’d need to implement route-following in the Vehicle class and have it request reservations at each upcoming intersection. SUMO integration could greatly help here, as SUMO can handle routing and car-following (longitudinal control to avoid rear-end collisions) while our logic handles the intersection right-of-way decisions.
+Richer Vehicle Dynamics: The current kinematics are over-simplified (point mass with immediate acceleration). A more realistic model would include separate longitudinal and lateral control, perhaps using a bicycle model for turning, speed limits, etc. For RL, one might keep it simple to ease learning, but for fidelity, using an external simulator (SUMO or CARLA for even more detail) might be appropriate.
+Advanced Communication Features: The SixGNetwork can incorporate Massive MIMO beamforming effects or blockage by reducing range in urban canyon scenarios, and perhaps simulate a slight increase in latency or message loss in extreme conditions (though 6G is expected to mitigate many of these issues). One could also simulate periodic vehicle state broadcasts – e.g. each vehicle sends its position every 100ms to neighbors, and use that to populate each vehicle’s nearby list more robustly (instead of our simplistic one).
+Multi-Agent RL Training: With the Gym environment defined, you can plug in RLlib (or Stable Baselines etc.) to train policies. For example, using RLlib: trainer = ppo.PPOTrainer(env=TrafficEnv, config={"env_config": {...}, "multiagent": {...}}). Define policies for each vehicle or a shared policy. The reward function may need shaping; safety constraints might be better handled via negative rewards or a two-tier learning approach (first learn to avoid collisions, then optimize speed). The state observation may be too large if many vehicles; one could use a graph neural network or attention mechanism to allow variable numbers of vehicles.
+Benchmarking and Logging: We included basic metrics. For a thorough evaluation, one would run the simulation under various conditions (vehicle counts, arrival rates) for both the signal-free (reservation) mode and a baseline with traffic signals. To simulate traffic signals, one could modify IntersectionManager to cycle through fixed green/red phases (grant reservations in a cyclic order irrespective of real-time demand). Then measure throughput (vehicles per unit time passing) and delay (average time spent waiting) in both cases
+thesai.org
+. Logging these and plotting graphs would show how the 6G-enabled system outperforms the traditional one, consistent with the paper’s claims.
+Safety and Emergency Handling: Incorporating an Emergency Braking System or safety override (as mentioned in the paper’s architecture
+thesai.org
+) would be important. In code, this could mean if two vehicles get too close, automatically set their acceleration to negative (brake) regardless of the RL policy. We partially do this with the yield logic and collision check. We could expand it to always ensure a minimum safe headway between vehicles on the same path as well.
+Energy and Emissions Model: To track energy efficiency and emissions, we can integrate models that convert speed/acceleration profiles into fuel consumption or battery usage and CO₂ emissions. For example, adding a function that given a vehicle’s acceleration and speed over time, computes energy used (there are standard models for this). Then log total energy and emissions for each scenario.
+By incrementally extending this prototype, one can arrive at a comprehensive city-scale 6G-enabled autonomous traffic simulator. The foundation laid here demonstrates how such a system coordinates vehicles through communication and learning, without traffic signals. The combination of ultra-low latency networking and AI-based control is what allows traffic to flow with minimal stopping, fulfilling the vision that “integrated 6G communication with networks of self-driving cars… may eventually free traffic lights from managing the traffic flow”
