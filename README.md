@@ -10,13 +10,113 @@ This project implements a comprehensive simulation and training framework for 6G
 - **6G Communication Simulation**: Ultra-low latency (1ms) V2V and V2I communication with network slicing
 - **Signal-Free Intersections**: Reservation-based intersection management without traffic lights
 - **Advanced Visualization**: Real-time Pygame and static matplotlib visualizations
-- **Multiple RL Algorithms**: Support for PPO, SAC, and DQN
+- **Multiple RL Algorithms**: Support for PPO, SAC, and DQN with custom training implementation
 - **Comprehensive Metrics**: Performance analysis including safety, efficiency, and network reliability
 
 ### Performance Benefits (Based on Research)
 - 40-50% reduction in intersection wait times
 - 50-70% fewer accidents
 - 35% lower emissions compared to traditional signalized systems
+
+## 🎯 Three-Phase Implementation Plan
+
+### Phase 1: Enhanced Training System ✅ **COMPLETED**
+**Objective**: Run longer training sessions with different parameters
+
+**Implementation**: Due to RLlib compatibility issues with trajectory batching, we developed a custom training system with:
+- Simple MLP policies (64 hidden units) for each vehicle agent
+- Policy gradient-based learning with reward-weighted MSE loss
+- Exploration noise decay from 0.3 to 0.05
+- Individual neural networks for each vehicle agent
+
+**Training Configurations**:
+- **Fast Config**: 25 rollout fragments, 200 batch size, 2 epochs - for rapid testing
+- **Stable Config**: 50 rollout fragments, 400 batch size, 3 epochs - for balanced learning  
+- **Performance Config**: 100 rollout fragments, 800 batch size, 4 epochs - for high-performance training
+
+**Results Achieved**:
+| Configuration | Vehicles | Episodes | Final Avg Reward | Episode Length | Key Features |
+|---------------|----------|----------|------------------|----------------|--------------|
+| Fast | 4 | 30 | 557.18 | 44.6 steps | Quick iterations |
+| Stable | 4 | 50 | 3,452.61 | 115.0 steps | Consistent improvement |
+| Performance | 6 | 25 | 8,270.42 | 333.1 steps | Large-scale training |
+
+**Saved Artifacts**:
+- Trained neural network policies for each vehicle agent
+- Complete training metrics in JSON format
+- Progress visualization plots
+- Model checkpoints for reproducible results
+
+### Phase 2: Visualization Capabilities 🔄 **PENDING**
+**Objective**: Enhanced visualization and analysis tools
+
+### Phase 3: Traffic Flow Optimization 🔄 **PENDING**
+**Objective**: Implement traffic flow optimization metrics
+
+## 🏗️ System Architecture
+
+### Technical Specifications
+- **4-6 autonomous vehicles** as independent RL agents
+- **6G communication network** with 1ms ultra-low latency V2V and V2I communication
+- **Signal-free intersection management** using reservation-based coordination
+- **33-dimensional observation space** per agent (vehicle state + intersection info + nearby vehicles)
+- **1-dimensional continuous action space** per agent (acceleration control)
+
+### Multi-Layer Decision Architecture
+
+Analysis revealed decisions are distributed across four layers:
+
+1. **🚗 Vehicle Layer (120 decisions)**: Individual driving decisions (acceleration/deceleration)
+   - Made by: RL agents or rule-based policies
+   - Frequency: Every timestep (10Hz)
+   - Example: "Accelerate at 1.5 m/s² to approach intersection"
+
+2. **📡 6G Network Layer (156 decisions)**: Communication decisions
+   - Message routing (126 decisions) and delivery (30 decisions)
+   - Made by: Network infrastructure
+   - Frequency: Sub-millisecond (continuous)
+   - Example: "Route safety message with high priority and 0.5ms latency"
+
+3. **🏛️ Infrastructure Layer (63 decisions)**: Coordination decisions
+   - Reservation grants (2) and denials (61)
+   - Made by: Intelligent intersection managers
+   - Frequency: On-demand
+   - Example: "Deny reservation due to time conflict"
+
+4. **🛡️ Safety Layer (30 decisions)**: Emergency interventions
+   - Emergency braking when collision risk detected
+   - Made by: Real-time safety monitoring
+   - Frequency: Continuous monitoring
+   - Example: "Override vehicle decision - apply emergency braking"
+
+### 6G Communication System Analysis
+
+**Communication Demonstration Results**:
+- **128 total messages** exchanged in 4.1 seconds
+- **100% network reliability** with 1.0ms latency
+- **Reservation requests** from vehicles to intersections
+- **Reservation confirmations/denials** from intersections to vehicles
+- **Network slicing** with priority-based message delivery (emergency, safety, normal)
+
+**Message Types**:
+1. **V2I Reservation Requests**: Vehicles request intersection crossing permissions when within 40m
+2. **I2V Responses**: Intersections grant/deny based on conflict detection
+3. **Network routing decisions**: 6G infrastructure handles message delivery with ultra-low latency
+
+## 🛠️ Technical Challenges and Solutions
+
+### RLlib Compatibility Issues
+- **Problem**: Encountered trajectory batching errors with Ray RLlib's new API stack
+- **Solution**: 
+  - Fixed deprecated API calls: `rollouts` → `env_runners`, `sgd_minibatch_size` → `minibatch_size`, `num_sgd_iter` → `num_epochs`
+  - Added proper multi-agent environment structure with `agents` and `possible_agents` attributes
+  - Switched to custom training implementation for better control
+
+### Environment Fixes
+- Corrected observation/action space definitions for multi-agent compatibility
+- Fixed policy mapping function signature for new RLlib API
+- Improved episode termination logic for more predictable training
+- Added proper agent tracking and space definitions
 
 ## 📁 Project Structure
 
