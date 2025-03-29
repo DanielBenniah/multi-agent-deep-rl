@@ -1,0 +1,5 @@
+{
+  "config_type": "fast",
+  "num_vehicles": 4,
+  "num_episodes": 30,
+  "final_avg_reward": 
