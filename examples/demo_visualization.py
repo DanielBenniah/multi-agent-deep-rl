@@ -1,228 +1,252 @@
 #!/usr/bin/env python3
 """
-Demo script for testing the traffic flow visualization system
-Simulates realistic traffic patterns without needing full RL training
+Demo Traffic Flow Visualization - Creates GIF for README
+Shows 6G-enabled autonomous vehicles with real-time coordination
 """
 
-import numpy as np
-import time
-import threading
 import sys
 import os
-import matplotlib
-matplotlib.use('TkAgg')  # Use TkAgg backend for better macOS compatibility
-import matplotlib.pyplot as plt
-
-# Add path to visualization module
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src', 'visualization'))
-from traffic_visualizer import TrafficFlowVisualizer
 
-class TrafficSimulationDemo:
-    """
-    Simple traffic simulation for demonstrating the visualization system.
-    """
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from traffic_visualizer import TrafficFlowVisualizer
+import time
+
+def create_demo_gif():
+    """Create a demo GIF showing 6G traffic coordination."""
+    print("🎯 Starting Traffic Flow Visualization Demo")
+    print("=========================================")
+    print("📊 Simulating 60 seconds of traffic")
+    print("🚗 4 vehicles approaching intersection") 
+    print("📡 6G communication and coordination")
+    print("🚦 Signal-free intersection management")
+    print("🎬 Creating GIF for README...")
     
-    def __init__(self):
-        self.visualizer = TrafficFlowVisualizer(figsize=(16, 10))
-        self.running = False
-        self.current_time = 0.0
-        self.dt = 0.1
+    # Create visualizer
+    visualizer = TrafficFlowVisualizer(figsize=(12, 8))
+    
+    # Storage for frames
+    frame_data = []
+    
+    # Simulate traffic scenario
+    dt = 0.1
+    total_steps = 600  # 60 seconds at 0.1s timesteps
+    
+    # Initialize 4 vehicles approaching intersection
+    vehicles = {
+        'vehicle_0': {'x': -100, 'y': 0, 'vx': 15, 'vy': 0, 'target_speed': 15, 'completed': False},
+        'vehicle_1': {'x': 0, 'y': -80, 'vx': 0, 'vy': 12, 'target_speed': 12, 'completed': False},
+        'vehicle_2': {'x': 90, 'y': 0, 'vx': -10, 'vy': 0, 'target_speed': 10, 'completed': False},
+        'vehicle_3': {'x': 0, 'y': 100, 'vx': 0, 'vy': -14, 'target_speed': 14, 'completed': False}
+    }
+    
+    reservations = {}
+    collision_count = 0
+    
+    for step in range(total_steps):
+        current_time = step * dt
         
-        # Initialize demo vehicles
-        self.vehicles = {
-            'vehicle_0': {'x': -80, 'y': 0, 'vx': 12, 'vy': 0, 'target_speed': 12},
-            'vehicle_1': {'x': 0, 'y': -70, 'vx': 0, 'vy': 10, 'target_speed': 10},
-            'vehicle_2': {'x': 60, 'y': 0, 'vx': -8, 'vy': 0, 'target_speed': 8},
-            'vehicle_3': {'x': 0, 'y': 80, 'vx': 0, 'vy': -11, 'target_speed': 11}
-        }
-        
-        # Simulation state
-        self.reservations = {}
-        self.collision_count = 0
-        self.message_history = []
-        
-    def simulate_6g_communication(self):
-        """Simulate 6G message exchanges between vehicles and intersection."""
+        # Update vehicle positions with smart coordination
         messages = []
         
-        # Each vehicle near intersection sends reservation request
-        for vid, vehicle in self.vehicles.items():
+        for vid, vehicle in vehicles.items():
+            if vehicle['completed']:
+                continue
+                
+            # Calculate distance to intersection
             dist_to_intersection = np.sqrt(vehicle['x']**2 + vehicle['y']**2)
             
-            if 20 < dist_to_intersection < 50 and vid not in self.reservations:
+            # Smart coordination: request reservation when approaching
+            if 20 < dist_to_intersection < 60 and vid not in reservations:
                 # Send reservation request
                 messages.append({
                     'sender_pos': (vehicle['x'], vehicle['y']),
-                    'receiver_pos': (0, 0),  # Intersection at origin
+                    'receiver_pos': (0, 0),
                     'type': 'reservation_request'
                 })
                 
-                # Simulate granting reservation
-                eta = self.current_time + dist_to_intersection / np.sqrt(vehicle['vx']**2 + vehicle['vy']**2 + 0.1)
-                self.reservations[vid] = eta
-                
-        return messages
-    
-    def simulate_vehicle_dynamics(self):
-        """Simulate realistic vehicle movement with collision avoidance."""
-        for vid, vehicle in self.vehicles.items():
-            # Check distance to intersection
-            dist_to_intersection = np.sqrt(vehicle['x']**2 + vehicle['y']**2)
+                # Grant reservation (simulate successful coordination)
+                eta = current_time + dist_to_intersection / (vehicle['target_speed'] + 0.1)
+                reservations[vid] = eta
             
-            # Simple collision avoidance: slow down if another vehicle is close
+            # Collision avoidance with other vehicles
             should_slow = False
-            for other_vid, other_vehicle in self.vehicles.items():
-                if other_vid != vid:
+            for other_vid, other_vehicle in vehicles.items():
+                if other_vid != vid and not other_vehicle['completed']:
                     dx = vehicle['x'] - other_vehicle['x']
                     dy = vehicle['y'] - other_vehicle['y']
                     distance = np.sqrt(dx**2 + dy**2)
                     
-                    if distance < 15:  # Too close, slow down
+                    if distance < 20:  # Too close, coordinate speeds
                         should_slow = True
                         break
             
-            # Adjust speed based on conditions
+            # Adjust speed based on coordination
             if should_slow:
-                # Slow down
-                speed_factor = 0.3
-            elif dist_to_intersection < 20 and vid not in self.reservations:
-                # Approaching intersection without reservation, slow down
-                speed_factor = 0.5
+                speed_factor = 0.4  # Slow down for coordination
+            elif dist_to_intersection < 25 and vid not in reservations:
+                speed_factor = 0.6  # Cautious approach without reservation
             else:
-                # Normal speed
-                speed_factor = 1.0
+                speed_factor = 1.0  # Normal speed with reservation
             
-            # Update velocity
-            target_vx = vehicle['vx'] / max(np.sqrt(vehicle['vx']**2 + vehicle['vy']**2), 0.1) * vehicle['target_speed'] * speed_factor
-            target_vy = vehicle['vy'] / max(np.sqrt(vehicle['vx']**2 + vehicle['vy']**2), 0.1) * vehicle['target_speed'] * speed_factor
-            
-            vehicle['vx'] = 0.9 * vehicle['vx'] + 0.1 * target_vx
-            vehicle['vy'] = 0.9 * vehicle['vy'] + 0.1 * target_vy
+            # Update velocity with smooth coordination
+            current_speed = np.sqrt(vehicle['vx']**2 + vehicle['vy']**2)
+            if current_speed > 0.1:
+                direction_x = vehicle['vx'] / current_speed
+                direction_y = vehicle['vy'] / current_speed
+                
+                target_speed = vehicle['target_speed'] * speed_factor
+                vehicle['vx'] = 0.8 * vehicle['vx'] + 0.2 * direction_x * target_speed
+                vehicle['vy'] = 0.8 * vehicle['vy'] + 0.2 * direction_y * target_speed
             
             # Update position
-            vehicle['x'] += vehicle['vx'] * self.dt
-            vehicle['y'] += vehicle['vy'] * self.dt
+            vehicle['x'] += vehicle['vx'] * dt
+            vehicle['y'] += vehicle['vy'] * dt
             
-            # Reset vehicles that have passed through
+            # Check if vehicle completed trip (passed intersection)
             if abs(vehicle['x']) > 120 or abs(vehicle['y']) > 120:
-                if vid == 'vehicle_0':
-                    vehicle['x'], vehicle['y'] = -80, 0
-                elif vid == 'vehicle_1':
-                    vehicle['x'], vehicle['y'] = 0, -70
-                elif vid == 'vehicle_2':
-                    vehicle['x'], vehicle['y'] = 60, 0
-                elif vid == 'vehicle_3':
-                    vehicle['x'], vehicle['y'] = 0, 80
-                
-                # Clear reservation
-                if vid in self.reservations:
-                    del self.reservations[vid]
-    
-    def generate_demo_data(self):
-        """Generate simulation data for visualization."""
-        # Simulate 6G communications
-        messages = self.simulate_6g_communication()
+                vehicle['completed'] = True
+                if vid in reservations:
+                    del reservations[vid]
         
-        # Update vehicle dynamics
-        self.simulate_vehicle_dynamics()
+        # Create 6G communication visualization
+        active_vehicles = {k: v for k, v in vehicles.items() if not v['completed']}
         
-        # Prepare vehicle data for visualization
+        # Add inter-vehicle communication for nearby vehicles
+        for vid1, v1 in active_vehicles.items():
+            for vid2, v2 in active_vehicles.items():
+                if vid1 != vid2:
+                    distance = np.sqrt((v1['x'] - v2['x'])**2 + (v1['y'] - v2['y'])**2)
+                    if distance < 50:  # 6G communication range
+                        messages.append({
+                            'sender_pos': (v1['x'], v1['y']),
+                            'receiver_pos': (v2['x'], v2['y']),
+                            'type': 'coordination'
+                        })
+        
+        # Prepare frame data
         vehicles_data = {}
-        for vid, vehicle in self.vehicles.items():
-            vehicles_data[vid] = {
-                'x': vehicle['x'],
-                'y': vehicle['y'],
-                'vx': vehicle['vx'],
-                'vy': vehicle['vy'],
-                'speed': np.sqrt(vehicle['vx']**2 + vehicle['vy']**2),
-                'trip_completed': False,
-                'collision_occurred': False,
-                'total_travel_time': self.current_time
-            }
+        for vid, vehicle in vehicles.items():
+            if not vehicle['completed']:
+                vehicles_data[vid] = {
+                    'x': vehicle['x'],
+                    'y': vehicle['y'],
+                    'vx': vehicle['vx'],
+                    'vy': vehicle['vy'],
+                    'speed': np.sqrt(vehicle['vx']**2 + vehicle['vy']**2),
+                    'trip_completed': False,
+                    'collision_occurred': False,
+                    'total_travel_time': current_time
+                }
         
         # Calculate metrics
-        avg_speed = np.mean([v['speed'] for v in vehicles_data.values()])
-        queue_length = len([v for v in self.vehicles.values() 
-                           if np.sqrt(v['x']**2 + v['y']**2) < 30])
+        active_count = len(vehicles_data)
+        avg_speed = np.mean([v['speed'] for v in vehicles_data.values()]) if vehicles_data else 0
+        queue_length = len([v for v in vehicles_data.values() 
+                           if np.sqrt(v['x']**2 + v['y']**2) < 40])
         
-        # Create environment data
         env_data = {
-            'current_time': self.current_time,
+            'current_time': current_time,
             'vehicles': vehicles_data,
-            'messages': messages,
-            'reservations': self.reservations,
-            'network_metrics': {'reliability': 0.98 + 0.02 * np.sin(self.current_time * 0.1)},
+            'messages': messages[-20:],  # Show recent messages only
+            'network_metrics': {'reliability': 0.99},
             'queue_metrics': {'queue_length': queue_length},
             'collision_detected': False,
-            'collision_count': self.collision_count,
-            'total_reward': 50 + 30 * np.sin(self.current_time * 0.05)
+            'collision_count': collision_count,
+            'total_reward': 100 + 50 * np.sin(current_time * 0.1),
+            'reservations': reservations
         }
         
-        return env_data
+        frame_data.append(env_data)
+        
+        # Print progress
+        if step % 100 == 0:
+            print(f"⏰ Simulation time: {current_time:.1f}s")
+            print(f"🚗 Active vehicles: {active_count}")
+            print(f"📡 Reservations: {len(reservations)}")
+        
+        # Stop if all vehicles completed
+        if all(v['completed'] for v in vehicles.values()):
+            print(f"✅ All vehicles completed trips at {current_time:.1f}s")
+            break
     
-    def run_simulation(self, duration=60):
-        """Run the demo simulation."""
-        print("🎯 Starting Traffic Flow Visualization Demo")
-        print("=========================================")
-        print(f"📊 Simulating {duration} seconds of traffic")
-        print("🚗 4 vehicles approaching intersection")
-        print("📡 6G communication and coordination")
-        print("🚦 Signal-free intersection management")
-        
-        # Run simulation in background thread, visualization in main thread
-        def simulation_loop():
-            self.running = True
-            while self.running and self.current_time < duration:
-                # Generate and send data to visualizer
-                env_data = self.generate_demo_data()
-                self.visualizer.update_data(env_data)
-                
-                # Update simulation time
-                self.current_time += self.dt
-                
-                # Control simulation speed
-                time.sleep(self.dt / 5)  # Run 5x real-time for demo
-                
-                # Print progress every 10 seconds
-                if int(self.current_time) % 10 == 0 and int(self.current_time) != int(self.current_time - self.dt):
-                    print(f"⏰ Simulation time: {self.current_time:.1f}s")
-                    print(f"🚗 Active vehicles: {len(self.vehicles)}")
-                    print(f"📡 Reservations: {len(self.reservations)}")
-        
-        # Start simulation thread
-        sim_thread = threading.Thread(target=simulation_loop)
-        sim_thread.daemon = True
-        sim_thread.start()
-        
-        # Start visualization in main thread (required by matplotlib)
-        try:
-            print("🎬 Opening visualization window...")
-            print("   You should see vehicles moving toward intersection!")
-            print("   🔵 Blue = vehicles, 🟠 = reserved, 🟢 = communication")
-            print("   Close window or press Ctrl+C to stop")
-            self.visualizer.start_visualization(interval=50)
-        except KeyboardInterrupt:
-            print("\n🛑 Demo interrupted by user")
-        except Exception as e:
-            print(f"\n❌ Visualization window failed: {e}")
-            print("🔄 Running text-only mode instead...")
-            # Run simple text demo as fallback
-            self.running = True
-            while self.running and self.current_time < 30:
-                env_data = self.generate_demo_data()
-                self.current_time += 1
-                if int(self.current_time) % 5 == 0:
-                    print(f"⏰ Time: {self.current_time:.0f}s | Vehicles at intersection: {env_data['queue_metrics']['queue_length']}")
-                time.sleep(0.2)
-        finally:
-            self.running = False
-            print("\n✅ Demo completed!")
-            print("📊 Traffic simulation finished successfully")
+    print("\n✅ Demo data collected!")
+    print("🎨 Creating animated GIF...")
+    
+    # Create animated GIF
+    gif_path, png_path = create_gif_from_data(visualizer, frame_data)
+    
+    print("📊 Traffic simulation finished successfully")
+    return gif_path, png_path
 
-def main():
-    """Run the visualization demo."""
-    demo = TrafficSimulationDemo()
-    demo.run_simulation(duration=120)  # 2 minutes of simulation
+def create_gif_from_data(visualizer, frame_data):
+    """Create GIF from simulation data."""
+    
+    def animate_frame(frame_num):
+        """Animation function for creating GIF."""
+        if frame_num >= len(frame_data):
+            return []
+        
+        # Update visualizer with frame data
+        visualizer.update_data(frame_data[frame_num])
+        
+        # Force animation update
+        visualizer._animate(frame_num)
+        
+        return []
+    
+    # Set up animation
+    visualizer.is_running = True
+    
+    # Create animation - sample every 3rd frame for smaller GIF
+    sample_frames = frame_data[::3]  # Take every 3rd frame
+    
+    ani = animation.FuncAnimation(
+        visualizer.fig, 
+        lambda frame: animate_frame(frame * 3),  # Adjust frame index
+        frames=len(sample_frames),
+        interval=150,  # 150ms between frames for smooth playback
+        blit=False,
+        repeat=True
+    )
+    
+    # Save as GIF
+    gif_path = "6g_traffic_demo.gif"
+    png_path = "6g_traffic_demo.png"
+    
+    print(f"💾 Saving GIF to: {gif_path}")
+    
+    try:
+        # Try to use pillow writer for GIF
+        ani.save(gif_path, writer='pillow', fps=8, dpi=80)
+        print(f"✅ GIF saved successfully: {gif_path}")
+        
+    except Exception as e:
+        print(f"⚠️ Error saving GIF with pillow: {e}")
+        
+        try:
+            # Fallback to imagemagick
+            ani.save(gif_path, writer='imagemagick', fps=8, dpi=80)
+            print(f"✅ GIF saved with imagemagick: {gif_path}")
+        except Exception as e2:
+            print(f"⚠️ Error saving GIF with imagemagick: {e2}")
+            gif_path = None
+    
+    # Always save a high-quality PNG frame
+    try:
+        # Use a representative frame (middle of simulation)
+        mid_frame = len(frame_data) // 2
+        visualizer.update_data(frame_data[mid_frame])
+        visualizer._animate(0)
+        visualizer.fig.savefig(png_path, dpi=150, bbox_inches='tight')
+        print(f"✅ PNG saved successfully: {png_path}")
+    except Exception as e:
+        print(f"⚠️ Error saving PNG: {e}")
+        png_path = None
+    
+    return gif_path, png_path
 
 if __name__ == "__main__":
-    main() 
+    create_demo_gif() 

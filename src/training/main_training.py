@@ -33,7 +33,8 @@ try:
     import sys
     import os
     sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'visualization'))
-    from traffic_visualizer import create_training_visualizer
+    from traffic_visualizer import TrafficFlowVisualizer, TrafficDataLogger
+    import matplotlib.pyplot as plt
     VISUALIZATION_AVAILABLE = True
 except ImportError:
     VISUALIZATION_AVAILABLE = False
@@ -1288,6 +1289,7 @@ def main():
     
     if args.visualize and VISUALIZATION_AVAILABLE:
         print("🎯 Visualization requested - switching to single-worker mode for compatibility")
+        from traffic_visualizer import create_training_visualizer
         visualizer, data_logger = create_training_visualizer()
         
         # Override worker settings for visualization compatibility
@@ -1302,51 +1304,8 @@ def main():
     ray.init(ignore_reinit_error=True)
     
     try:
-        # Create monitored environment if visualization is enabled
-        if visualizer and data_logger:
-            # Create a monitored version that logs to visualizer
-            class MonitoredSixGTrafficEnv(SixGTrafficEnv):
-                def __init__(self, config):
-                    super().__init__(config)
-                    # Note: We can't store visualizer directly due to serialization
-                    # Instead, we'll use a global reference approach
-                    
-                def step(self, action_dict):
-                    obs, rewards, terminateds, truncateds, infos = super().step(action_dict)
-                    
-                    # Log to global visualizer every few steps
-                    if hasattr(self, '_step_count'):
-                        self._step_count += 1
-                    else:
-                        self._step_count = 0
-                        
-                    if self._step_count % 10 == 0:
-                        try:
-                            # Use global data_logger reference
-                            global _global_data_logger
-                            if '_global_data_logger' in globals() and _global_data_logger:
-                                additional_info = {
-                                    'episode_returns': sum(rewards.values()) if rewards else 0,
-                                    'step_count': self._step_count
-                                }
-                                _global_data_logger.log_environment_state(self, additional_info)
-                        except Exception as e:
-                            pass  # Silently ignore visualization errors
-                    
-                    return obs, rewards, terminateds, truncateds, infos
-                    
-                def reset(self, **kwargs):
-                    obs, infos = super().reset(**kwargs)
-                    self._step_count = 0
-                    return obs, infos
-            
-            # Set global reference for the environment to use
-            global _global_data_logger
-            _global_data_logger = data_logger
-            
-            env_name = MonitoredSixGTrafficEnv
-        else:
-            env_name = SixGTrafficEnv
+        # Use standard environment - visualization will run separately
+        env_name = SixGTrafficEnv
         
         # Create configuration
         config = create_rllib_config(
@@ -1362,9 +1321,78 @@ def main():
         print(f"📈 Iterations: {args.iterations}")
         print(f"📺 Visualization: {'ON' if args.visualize and VISUALIZATION_AVAILABLE else 'OFF'}")
         
-        # Note: We'll start visualization after training due to GUI threading constraints on macOS
+        # Start real-time training demo if visualization requested
         if visualizer:
-            print("🎬 Visualization will start after training completes")
+            print("🎬 Starting REAL-TIME training visualization demo...")
+            print("   This will show animated vehicles during training!")
+            
+            # Start visualization in a separate thread
+            def run_training_visualization():
+                """Run animated traffic demo during training."""
+                try:
+                    # Create a demo environment for visualization
+                    demo_env = SixGTrafficEnv({'num_vehicles': min(args.num_vehicles, 4), 'max_episode_steps': 200})
+                    
+                    # Simulate training episodes with visualization
+                    for demo_episode in range(10):  # Show 10 demo episodes
+                        print(f"🎬 Demo Episode {demo_episode + 1}/10")
+                        
+                        obs, infos = demo_env.reset()
+                        episode_data = {
+                            'vehicles': {},
+                            'messages': [],
+                            'intersections': {},
+                            'metrics': {'episode_returns': 0, 'collisions': 0}
+                        }
+                        
+                        for step in range(200):
+                            # Random actions for demo (training would use learned policy)
+                            actions = {agent_id: demo_env.action_space.spaces[agent_id].sample() 
+                                     for agent_id in obs.keys()}
+                            
+                            obs, rewards, terminateds, truncateds, infos = demo_env.step(actions)
+                            
+                            # Update visualization data
+                            episode_data['metrics']['episode_returns'] += sum(rewards.values()) if rewards else 0
+                            
+                            # Simulate vehicle data for visualization
+                            for vehicle_id, vehicle in demo_env.vehicles.items():
+                                episode_data['vehicles'][vehicle_id] = {
+                                    'x': vehicle.x, 'y': vehicle.y,
+                                    'vx': vehicle.vx, 'vy': vehicle.vy,
+                                    'status': 'completed' if vehicle.trip_completed else 'active'
+                                }
+                            
+                            # Log to visualizer every few steps
+                            if step % 5 == 0:
+                                try:
+                                    data_logger.log_environment_state(demo_env, episode_data)
+                                except Exception as e:
+                                    pass  # Continue if visualization fails
+                            
+                            if terminateds.get('__all__', False) or truncateds.get('__all__', False):
+                                break
+                        
+                        print(f"   Episode return: {episode_data['metrics']['episode_returns']:.1f}")
+                        time.sleep(1)  # Pause between episodes
+                        
+                except Exception as e:
+                    print(f"⚠️ Visualization demo error: {e}")
+            
+            # Start visualization in background
+            visualization_thread = threading.Thread(target=run_training_visualization, daemon=True)
+            visualization_thread.start()
+            
+            # Start the visualizer
+            visualization_gui_thread = threading.Thread(
+                target=lambda: visualizer.start_visualization(interval=100), 
+                daemon=True
+            )
+            visualization_gui_thread.start()
+            
+            print("🎯 Visualization demo running alongside training!")
+            print("   You should see an animated matplotlib window with moving vehicles!")
+            print("   Close matplotlib window to stop visualization")
         
         # Run training
         import os
@@ -1383,23 +1411,9 @@ def main():
         print("\n✅ Training completed successfully!")
         print(f"📁 Results saved to: {storage_path}")
         
-        # Save final visualization frame if requested
-        if visualizer and args.save_videos:
-            final_frame_path = f"{storage_path}/6g_traffic_{args.algorithm}_{args.num_vehicles}v_final_visualization.png"
-            try:
-                visualizer.save_frame(final_frame_path)
-                print(f"🖼️  Final visualization saved: {final_frame_path}")
-            except Exception as e:
-                print(f"⚠️  Could not save visualization frame: {e}")
-        
         if visualizer:
-            print("\n🎬 Starting post-training visualization...")
-            try:
-                # Load training data and show visualization
-                visualizer.start_visualization(interval=100)
-            except Exception as e:
-                print(f"⚠️ Visualization error: {e}")
-                print("📊 Training data logged for later analysis")
+            print("🎬 Training visualization demo should still be running")
+            print("   Close the matplotlib window to finish")
         
     except Exception as e:
         print(f"❌ Training failed: {e}")
@@ -1407,15 +1421,13 @@ def main():
         traceback.print_exc()
     
     finally:
-        # Cleanup visualization
+        # Cleanup
         if visualizer:
-            try:
-                visualizer.stop_visualization()
-                print("🛑 Visualization stopped")
-            except:
-                pass
+            print("🎬 Visualization demo completed")
         
         ray.shutdown()
+
+
 
 if __name__ == "__main__":
     # Test environment first
