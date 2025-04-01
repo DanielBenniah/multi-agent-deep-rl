@@ -1,0 +1,71 @@
+{
+  "sixg_statistics": {
+    "travel_time": {
+      "mean": 0,
+      "std": 0,
+      "min": 0,
+      "max": 0
+    },
+    "waiting_time": {
+      "mean": 0,
+      "std": 0,
+      "min": 0,
+      "max": 0
+    },
+    "throughput": {
+      "mean": 0,
+      "std": 0,
+      "min": 0,
+      "max": 0
+    },
+    "collisions": {
+      "mean": 0,
+      "std": 0,
+      "min": 0,
+      "max": 0
+    },
+    "queue_length": {
+      "mean": 0,
+      "std": 0,
+      "min": 0,
+      "max": 0
+    },
+    "energy": {
+      "mean": 0,
+      "std": 0,
+      "min": 0,
+      "max": 0
+    },
+    "episode_return": {
+      "mean": 0,
+      "std": 0,
+      "min": 0,
+      "max": 0
+    }
+  },
+  "traffic_light_statistics": {
+    "travel_time": {
+      "mean": 22.348095238095308,
+      "std": 0.9255410870700984,
+      "min": 21.580000000000062,
+      "max": 23.650000000000087,
+      "median": 21.81428571428577
+    },
+    "waiting_time": {
+      "mean": 4.353492063492069,
+      "std": 1.0323846375302739,
+      "min": 3.057142857142862,
+      "max": 5.583333333333337,
+      "median": 4.420000000000009
+    },
+    "throughput": {
+      "mean": 4.500000000000015,
+      "std": 0.6123724356957965,
+      "min": 3.750000000000013,
+      "max": 5.250000000000018,
+      "median": 4.500000000000015
+    },
+    "collisions": {
+      "mean": 0.0,
+      "std": 0.0,
+      "min": 
