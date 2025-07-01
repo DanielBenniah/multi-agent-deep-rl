@@ -1,6 +1,9 @@
 # 6G-Enabled Autonomous Traffic Management with Multi-Agent Deep Reinforcement Learning
 
 This project implements a comprehensive simulation and training framework for 6G-enabled autonomous vehicle traffic management using Multi-Agent Deep Reinforcement Learning (MARL). The system demonstrates how 6G's ultra-low latency communication enables signal-free intersection management through intelligent vehicle coordination.
+**Important**: This repository is a simplified prototype. Some metrics below were generated using simulated data for demonstration purposes.
+
+To obtain real performance metrics, train the agents using the scripts in the Quick Start section. After training, evaluation logs are written to the `ray_results/` directory.
 
 ## 🚗 Project Overview
 
@@ -176,10 +179,14 @@ python3 src/visualization/simple_visualization_test.py
 # 🎬 GIF: 6g_traffic_demo.gif (animated)
 # 🖼️  PNG: 6g_traffic_demo.png (static frame)
 ```
+## 📈 Obtaining Real Results
 
-## 📊 Proven Results
+After training completes, check the `ray_results/` directory for logs and checkpoints. You can run `python3 src/training/performance_comparison.py --checkpoint <path>` to evaluate a trained model and generate updated metrics in the `results/` folder.
 
-### Breakthrough Achievement: 6-Vehicle Coordination
+
+## 📊 Example Results (Simulation)
+
+### Example: 6-Vehicle Coordination
 - **Episode Return**: **+2,084** (outstanding coordination!)
 - **Training Time**: 45 minutes with Ray distributed training
 - **System Capability**: Successfully coordinates 6 autonomous vehicles
@@ -188,11 +195,11 @@ python3 src/visualization/simple_visualization_test.py
 
 ### 🚦 Performance vs Traditional Traffic Lights
 
-Recent comprehensive comparison demonstrates **revolutionary improvements** over traditional traffic light systems:
+Earlier simulations indicated significant improvements over traditional traffic light systems:
 
 | **Performance Metric** | **6G MARL System** | **Traffic Lights** | **Improvement** |
 |------------------------|-------------------|---------------------|-----------------|
-| **Episode Return** | **+2,125** | **-240** | **Performance Revolution** |
+| **Episode Return** | **+2,125** | **-240** | **Performance Gain** |
 | **Travel Time** | **12.3 seconds** | 20.3 seconds | **🚀 39.2% faster** |
 | **Waiting Time** | **1.1 seconds** | 31.6 seconds | **🚀 96.7% reduction** |
 | **Queue Length** | **0 vehicles** | 3.0 vehicles | **🚀 100% elimination** |
@@ -201,7 +208,7 @@ Recent comprehensive comparison demonstrates **revolutionary improvements** over
 | **Energy Efficiency** | **85.4 units** | 190.6 units | **🚀 55% more efficient** |
 | **Collisions** | **0** | **0** | ✅ **Perfect safety** |
 
-### 🎯 Revolutionary Traffic Management Benefits
+### 🎯 Potential Traffic Management Benefits
 
 **🚀 Zero Wait Times**: 96.7% reduction in waiting time (31.6s → 1.1s)
 **🚀 Zero Queues**: Complete elimination of traffic queues at intersections
@@ -222,7 +229,7 @@ Recent comprehensive comparison demonstrates **revolutionary improvements** over
 - ✅ **Signal-free intersection management**: Proven scalable to realistic traffic densities
 - ✅ **Multi-agent learning**: Emergent coordination without centralized control
 - ✅ **Ultra-low latency critical**: 1ms 6G communication enables real-time coordination
-- ✅ **Revolutionary traffic flow**: 96.7% reduction in waiting times vs traditional signals
+- ✅ **Notable traffic flow improvement**: 96.7% reduction in waiting times vs traditional signals
 
 ## 🎮 Visualization Features
 
@@ -349,7 +356,7 @@ python3 src/training/main_training.py --num-vehicles 2 --iterations 10 --visuali
 ## 🎯 Key Achievements Summary
 
 ### Technical Breakthroughs
-- ✅ **+2,084 episode return** with 6 vehicles (research-grade performance)
+- ✅ **+2,084 episode return** with 6 vehicles
 - ✅ **81% performance improvement** through scaling
 - ✅ **6G communication coordination** proven effective
 - ✅ **Signal-free intersection management** successfully validated
@@ -406,4 +413,4 @@ For questions and support:
 
 ---
 
-**Note**: This project demonstrates research-grade results with proven +2,084 episode return performance. The 6G-enabled coordination system successfully scales to 6 vehicles and validates signal-free intersection management concepts. All training results and visualization capabilities are fully functional and ready for research deployment. 
+**Note**: This repository provides a simplified prototype. The performance figures above were originally produced from simulation. Train the models and check `ray_results/` for actual results.
