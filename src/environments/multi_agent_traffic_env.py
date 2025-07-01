@@ -24,6 +24,8 @@ logger = logging.getLogger("MARL_Traffic")
 DEFAULT_6G_LATENCY = 0.001  # 1 ms latency
 DEFAULT_6G_RANGE = 1000.0   # 1 km communication range
 DEFAULT_6G_BANDWIDTH = 1e9  # 1 Gbps
+DEFAULT_6G_SNR = 10.0       # Linear signal-to-noise ratio
+DEFAULT_THz_PATH_LOSS_DB = 0.0  # Path loss in decibels for THz channel
 
 class SixGNetwork:
     """
@@ -31,13 +33,24 @@ class SixGNetwork:
     Supports V2V and V2I communication with network slicing.
     """
     
-    def __init__(self, latency=DEFAULT_6G_LATENCY, comm_range=DEFAULT_6G_RANGE):
+    def __init__(self, latency=DEFAULT_6G_LATENCY, comm_range=DEFAULT_6G_RANGE,
+                 bandwidth=DEFAULT_6G_BANDWIDTH, snr=DEFAULT_6G_SNR,
+                 path_loss_db=DEFAULT_THz_PATH_LOSS_DB):
         self.latency = latency
         self.range = comm_range
+        self.bandwidth = bandwidth
+        self.snr = snr
+        self.path_loss_db = path_loss_db
+
         self.message_queue = []
         self.network_load = 0
         self.total_messages = 0
         self.dropped_messages = 0
+
+    def calculate_capacity(self) -> float:
+        """Calculate channel capacity accounting for path loss."""
+        effective_snr = self.snr * (10 ** (-self.path_loss_db / 10))
+        return self.bandwidth * math.log2(1 + effective_snr)
         
     def send_message(self, sender, receiver, message, priority="normal", current_time=0):
         """Send message with network slicing support for different priorities."""
@@ -60,7 +73,12 @@ class SixGNetwork:
         else:
             actual_latency = self.latency
             
-        deliver_time = current_time + actual_latency
+        # Transmission delay based on capacity
+        message_size_bits = len(str(message).encode("utf-8")) * 8
+        capacity = self.calculate_capacity()
+        transmission_delay = message_size_bits / max(capacity, 1e-9)
+
+        deliver_time = current_time + actual_latency + transmission_delay
         self.message_queue.append((deliver_time, receiver, message, sender))
         self.total_messages += 1
         return True
@@ -96,7 +114,8 @@ class SixGNetwork:
             "dropped_messages": self.dropped_messages,
             "reliability": reliability,
             "queue_length": len(self.message_queue),
-            "average_latency": self.latency
+            "average_latency": self.latency,
+            "capacity_bps": self.calculate_capacity()
         }
 
 class Vehicle:
@@ -521,7 +540,13 @@ class MultiAgentTrafficEnv(MultiAgentEnv):
         self.vehicle_spawn_distance = config.get("vehicle_spawn_distance", 80.0)
         
         # Environment entities
-        self.network = SixGNetwork()
+        self.network = SixGNetwork(
+            latency=config.get("6g_latency", DEFAULT_6G_LATENCY),
+            comm_range=config.get("6g_range", DEFAULT_6G_RANGE),
+            bandwidth=config.get("6g_bandwidth", DEFAULT_6G_BANDWIDTH),
+            snr=config.get("6g_snr", DEFAULT_6G_SNR),
+            path_loss_db=config.get("terahertz_path_loss_db", DEFAULT_THz_PATH_LOSS_DB),
+        )
         self.intersections = []
         self.vehicles = {}
         self.time = 0.0
