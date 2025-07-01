@@ -105,14 +105,16 @@ class Vehicle:
     Each vehicle is an independent RL agent.
     """
     
-    def __init__(self, vid: int, x: float, y: float, target_x: float, target_y: float, 
-                 max_speed: float = 15.0, approach_direction: str = "east"):
+    def __init__(self, vid: int, x: float, y: float, target_x: float, target_y: float,
+                 max_speed: float = 15.0, approach_direction: str = "east",
+                 priority: str = "normal"):
         self.id = vid
         self.x = x
         self.y = y
         self.target_x = target_x
         self.target_y = target_y
         self.approach_direction = approach_direction
+        self.priority = priority
         
         # Physical properties
         self.length = 5.0
@@ -308,10 +310,11 @@ class Vehicle:
             "eta": eta,
             "vehicle_id": self.id,
             "approach_direction": self.approach_direction,
-            "priority": "normal"
+            "priority": self.priority,
+            "request_time": current_time
         }
-        
-        return self.network.send_message(self, intersection, message, "normal", current_time)
+
+        return self.network.send_message(self, intersection, message, self.priority, current_time)
     
     def receive_message(self, message: Dict, sender):
         """Handle incoming network messages."""
@@ -399,7 +402,9 @@ class IntersectionManager:
         self.x = x
         self.y = y
         self.conflict_radius = conflict_radius
-        self.reservations = []  # (time_slot, vehicle_id, direction)
+        # reservation entries contain entry_time, exit_time, vehicle_id, direction, priority
+        self.reservations = []
+        self.crossing_time = 2.0
         self.current_vehicle = None
         self.vehicles_served = 0
         self.total_wait_time = 0.0
@@ -409,6 +414,13 @@ class IntersectionManager:
     def set_network(self, network: SixGNetwork):
         """Connect intersection to 6G network."""
         self.network = network
+
+    def get_vehicle_reservation(self, vehicle_id: int) -> Optional[Dict]:
+        """Return reservation entry for a specific vehicle if present."""
+        for res in self.reservations:
+            if res["vehicle_id"] == vehicle_id:
+                return res
+        return None
         
     def receive_message(self, message: Dict, sender):
         """Handle reservation requests from vehicles."""
@@ -419,49 +431,41 @@ class IntersectionManager:
         eta = message.get("eta")
         direction = message.get("approach_direction")
         priority = message.get("priority", "normal")
+        request_time = message.get("request_time", 0.0)
         
-        # Check for conflicts
-        if self._check_reservation_conflict(eta, direction):
-            # Send denial
+        # Find feasible time considering priority and dynamics
+        feasible_eta = self._find_feasible_time(eta, direction, priority, sender, request_time)
+        if feasible_eta is None:
             if self.network:
                 denial_msg = {
                     "type": "reservation_denied",
-                    "reason": "time_conflict",
+                    "reason": "infeasible",
                     "suggested_eta": eta + 2.0
                 }
                 self.network.send_message(self, sender, denial_msg, "normal")
-                self.rejection_count += 1
-                logger.debug(f"Intersection {self.id}: denied reservation for vehicle {vehicle_id}")
+            self.rejection_count += 1
+            logger.debug(
+                f"Intersection {self.id}: denied reservation for vehicle {vehicle_id}")
         else:
-            # Grant reservation
-            self.reservations.append((eta, vehicle_id, direction))
-            self.reservations.sort(key=lambda x: x[0])  # Sort by time
-            
+            entry = {
+                "entry_time": feasible_eta,
+                "exit_time": feasible_eta + self.crossing_time,
+                "vehicle_id": vehicle_id,
+                "direction": direction,
+                "priority": priority
+            }
+            self.reservations.append(entry)
+            self.reservations.sort(key=lambda x: x["entry_time"])
+
             if self.network:
                 confirmation_msg = {
                     "type": "reservation_confirmation",
-                    "slot": eta,
+                    "slot": feasible_eta,
                     "intersection_id": self.id
                 }
                 self.network.send_message(self, sender, confirmation_msg, "safety")
-                logger.debug(f"Intersection {self.id}: granted reservation to vehicle {vehicle_id} at t={eta:.2f}")
-    
-    def _check_reservation_conflict(self, requested_eta: float, direction: str) -> bool:
-        """Check if requested time conflicts with existing reservations."""
-        buffer_time = 1.5  # Minimum time between vehicles (seconds)
-        
-        for eta, _, existing_direction in self.reservations:
-            time_diff = abs(eta - requested_eta)
-            
-            # Check for time conflicts
-            if time_diff < buffer_time:
-                # Additional check for crossing conflicts
-                if self._directions_conflict(direction, existing_direction):
-                    return True
-                elif time_diff < buffer_time * 0.5:  # Same direction needs smaller buffer
-                    return True
-        
-        return False
+            logger.debug(
+                f"Intersection {self.id}: granted reservation to vehicle {vehicle_id} at t={feasible_eta:.2f}")
     
     def _directions_conflict(self, dir1: str, dir2: str) -> bool:
         """Check if two approach directions conflict."""
@@ -472,21 +476,79 @@ class IntersectionManager:
             ("south", "east"), ("south", "west")
         }
         return (dir1, dir2) in crossing_conflicts or (dir2, dir1) in crossing_conflicts
+
+    def _priority_value(self, priority: str) -> int:
+        levels = {"low": 0, "normal": 1, "high": 2, "emergency": 3}
+        return levels.get(priority, 1)
+
+    def _is_trajectory_feasible(self, vehicle: Vehicle, eta: float, current_time: float) -> bool:
+        """Check if vehicle can reach intersection at eta respecting acceleration limits."""
+        dt = eta - current_time
+        if dt <= 0:
+            return False
+        dist = math.hypot(vehicle.x - self.x, vehicle.y - self.y)
+        speed = math.hypot(vehicle.vx, vehicle.vy)
+        req_acc = 2 * (dist - speed * dt) / (dt ** 2)
+        if req_acc > vehicle.max_acceleration or req_acc < vehicle.max_deceleration:
+            return False
+        return True
+
+    def _find_feasible_time(self, requested_eta: float, direction: str, priority: str,
+                            vehicle: Vehicle, current_time: float) -> Optional[float]:
+        """Find earliest feasible reservation time given conflicts and dynamics."""
+        eta = max(requested_eta, current_time)
+        buffer_step = 0.5
+        while eta < requested_eta + 20.0:  # search horizon
+            if not self._is_trajectory_feasible(vehicle, eta, current_time):
+                eta += buffer_step
+                continue
+            conflict = False
+            for res in sorted(self.reservations, key=lambda r: r["entry_time"]):
+                if self._directions_conflict(direction, res["direction"]):
+                    buffer = self.crossing_time
+                else:
+                    buffer = self.crossing_time * 0.5
+                if not (eta >= res["exit_time"] + buffer or eta + self.crossing_time <= res["entry_time"] - buffer):
+                    if self._priority_value(priority) > self._priority_value(res["priority"]):
+                        # push the lower priority reservation
+                        res_start = res["exit_time"] + buffer
+                        res["entry_time"] = res_start
+                        res["exit_time"] = res_start + self.crossing_time
+                    else:
+                        eta = res["exit_time"] + buffer
+                        conflict = True
+                        break
+            if conflict:
+                continue
+            if self._is_trajectory_feasible(vehicle, eta, current_time):
+                return eta
+            eta += buffer_step
+        return None
     
     def update(self, vehicles: List[Vehicle], current_time: float):
         """Update intersection state."""
         # Remove old reservations
-        self.reservations = [(t, v, d) for t, v, d in self.reservations 
-                           if t > current_time - 5.0]
+        self.reservations = [r for r in self.reservations
+                              if r["exit_time"] > current_time - 5.0]
         
         # Check which vehicles are in intersection
         vehicles_in_intersection = []
         for vehicle in vehicles:
             dist = math.hypot(vehicle.x - self.x, vehicle.y - self.y)
             if dist < self.conflict_radius:
-                vehicles_in_intersection.append(vehicle)
+                res = self.get_vehicle_reservation(vehicle.id)
+                if res:
+                    if current_time < res["entry_time"]:
+                        vehicle.collision_occurred = True
+                    elif res["entry_time"] <= current_time <= res["exit_time"]:
+                        vehicles_in_intersection.append(vehicle)
+                else:
+                    vehicle.collision_occurred = True
         
         # Update current vehicle
+        if len(vehicles_in_intersection) > 1:
+            for v in vehicles_in_intersection:
+                v.collision_occurred = True
         if vehicles_in_intersection:
             self.current_vehicle = vehicles_in_intersection[0]
         else:
@@ -604,7 +666,8 @@ class MultiAgentTrafficEnv(MultiAgentEnv):
                 y=config["start_y"] + noise_y,
                 target_x=config["target_x"],
                 target_y=config["target_y"],
-                approach_direction=config["direction"]
+                approach_direction=config["direction"],
+                priority="normal"
             )
             vehicle.set_network(self.network)
             
@@ -722,6 +785,17 @@ class MultiAgentTrafficEnv(MultiAgentEnv):
     
     def _apply_safety_constraints(self, vehicle: Vehicle):
         """Apply safety constraints to prevent collisions."""
+        # Prevent entering intersection without reservation or outside time slot
+        nearest = vehicle._find_nearest_intersection(self.intersections)
+        if nearest:
+            res = nearest.get_vehicle_reservation(vehicle.id)
+            dist = math.hypot(nearest.x - vehicle.x, nearest.y - vehicle.y)
+            if res:
+                if dist < nearest.conflict_radius and not (res["entry_time"] <= self.time <= res["exit_time"]):
+                    vehicle.acceleration = min(vehicle.acceleration, vehicle.max_deceleration)
+            elif dist < nearest.conflict_radius:
+                vehicle.acceleration = min(vehicle.acceleration, vehicle.max_deceleration)
+
         for other_vehicle in self.vehicles.values():
             if other_vehicle.id != vehicle.id and not other_vehicle.completed_trip:
                 # Calculate distance and relative velocity
