@@ -4,10 +4,11 @@ Simple test for traffic flow visualization data processing
 Tests the data flow without GUI requirements
 """
 
-import numpy as np
-import matplotlib
+import pytest
+np = pytest.importorskip("numpy")
+matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use('Agg')  # Use non-interactive backend
-import matplotlib.pyplot as plt
+plt = matplotlib.pyplot
 from traffic_visualizer import TrafficFlowVisualizer, TrafficDataLogger
 
 def test_visualization_data_flow():
